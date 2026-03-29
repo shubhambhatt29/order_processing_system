@@ -3,11 +3,13 @@
 #include "OrderService.hpp"
 
 static void cleanTestData() {
-  MYSQL* conn = DatabaseManager::getInstance()->getConnection();
+  DatabaseManager* db = DatabaseManager::getInstance();
+  MYSQL* conn = db->acquire();
   mysql_query(conn, "DELETE FROM order_items");
   mysql_query(conn, "DELETE FROM orders");
   mysql_query(conn, "ALTER TABLE orders AUTO_INCREMENT = 1");
   mysql_query(conn, "ALTER TABLE order_items AUTO_INCREMENT = 1");
+  db->release(conn);
 }
 
 static int createTestOrder(OrderService* service, std::string name,
