@@ -1,50 +1,62 @@
 #include "OrderService.hpp"
+#include "OrderRepository.hpp"
+#include "OrderFactory.hpp"
 #include <iostream>
 
-OrderService::OrderService() {
-  repository = new OrderRepository();
+OrderService::OrderService()
+  : repository(std::make_unique<OrderRepository>()),
+    promotionStrategy(std::make_unique<TimeBasedPromotion>()) {}
+
+OrderService::OrderService(std::unique_ptr<IOrderRepository> repo)
+  : repository(std::move(repo)),
+    promotionStrategy(std::make_unique<TimeBasedPromotion>()) {}
+
+void OrderService::addObserver(IOrderObserver* observer) {
+  observers.push_back(observer);
 }
 
-OrderService::~OrderService() {
-  delete repository;
+void OrderService::removeObserver(IOrderObserver* observer) {
+  observers.erase(
+    std::remove(observers.begin(), observers.end(), observer),
+    observers.end()
+  );
+}
+
+void OrderService::notifyObservers(int orderId, OrderStatus oldStatus, OrderStatus newStatus) {
+  for (auto* observer : observers) {
+    observer->onStatusChanged(orderId, oldStatus, newStatus);
+  }
 }
 
 int OrderService::createOrder(std::string customerName, std::vector<OrderItem> items) {
-  if (customerName.empty()) {
-    std::cerr << "Customer name cannot be empty." << std::endl;
+  try {
+    Order order = OrderFactory::createOrder(customerName, items);
+
+    int orderId = repository->createOrder(order);
+    if (orderId > 0) {
+      std::cout << "Order #" << orderId << " created successfully." << std::endl;
+    }
+    return orderId;
+  } catch (const std::invalid_argument& e) {
+    std::cerr << e.what() << std::endl;
     return -1;
   }
-  if (items.empty()) {
-    std::cerr << "Order must have at least one item." << std::endl;
-    return -1;
-  }
-
-  Order order(customerName);
-  for (auto& item : items) {
-    order.addItem(item);
-  }
-
-  int orderId = repository->createOrder(order);
-  if (orderId > 0) {
-    std::cout << "Order #" << orderId << " created successfully." << std::endl;
-  }
-  return orderId;
 }
 
-Order* OrderService::getOrderById(int orderId) {
+std::unique_ptr<Order> OrderService::getOrderById(int orderId) {
   return repository->findById(orderId);
 }
 
-std::vector<Order*> OrderService::getAllOrders() {
+std::vector<std::unique_ptr<Order>> OrderService::getAllOrders() {
   return repository->findAll();
 }
 
-std::vector<Order*> OrderService::getOrdersByStatus(OrderStatus status) {
+std::vector<std::unique_ptr<Order>> OrderService::getOrdersByStatus(OrderStatus status) {
   return repository->findByStatus(status);
 }
 
 bool OrderService::cancelOrder(int orderId) {
-  Order* order = repository->findById(orderId);
+  auto order = repository->findById(orderId);
   if (order == nullptr) {
     std::cerr << "Order #" << orderId << " not found." << std::endl;
     return false;
@@ -55,28 +67,49 @@ bool OrderService::cancelOrder(int orderId) {
               << "Only PENDING orders can be cancelled. "
               << "Current status: " << orderStatusToString(order->getStatus())
               << std::endl;
-    delete order;
     return false;
   }
 
   bool result = repository->updateStatus(orderId, CANCELLED);
   if (result) {
     std::cout << "Order #" << orderId << " has been cancelled." << std::endl;
+    notifyObservers(orderId, PENDING, CANCELLED);
   }
-  delete order;
   return result;
 }
 
-bool OrderService::updateOrderStatus(int orderId, OrderStatus status) {
-  return repository->updateStatus(orderId, status);
+bool OrderService::updateOrderStatus(int orderId, OrderStatus newStatus) {
+  auto order = repository->findById(orderId);
+  if (order == nullptr) {
+    std::cerr << "Order #" << orderId << " not found." << std::endl;
+    return false;
+  }
+
+  OrderStatus currentStatus = order->getStatus();
+
+  if (!isValidTransition(currentStatus, newStatus)) {
+    std::cerr << "Invalid status transition: "
+              << orderStatusToString(currentStatus) << " -> "
+              << orderStatusToString(newStatus) << std::endl;
+    return false;
+  }
+
+  bool result = repository->updateStatus(orderId, newStatus);
+  if (result) {
+    notifyObservers(orderId, currentStatus, newStatus);
+  }
+  return result;
 }
 
 void OrderService::promotePendingOrders() {
-  // Only promote orders that have been PENDING for at least 5 minutes (300s)
-  std::vector<int> eligibleIds = repository->findEligibleForPromotion(300);
+  auto eligibleIds = promotionStrategy->findEligibleOrders(*repository);
+  OrderStatus target = promotionStrategy->targetStatus();
   for (int id : eligibleIds) {
-    repository->updateStatus(id, PROCESSING);
-    std::cout << "  Order #" << id << " promoted to PROCESSING." << std::endl;
+    if (repository->updateStatus(id, target)) {
+      notifyObservers(id, PENDING, target);
+      std::cout << "  Order #" << id << " promoted to "
+                << orderStatusToString(target) << "." << std::endl;
+    }
   }
   if (eligibleIds.empty()) {
     std::cout << "  No eligible orders to promote." << std::endl;

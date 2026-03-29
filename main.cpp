@@ -3,24 +3,26 @@
 #include <vector>
 #include <sstream>
 #include <iomanip>
+#include <memory>
 
 #include "DatabaseManager.hpp"
 #include "OrderService.hpp"
 #include "BackgroundJob.hpp"
+#include "IOrderObserver.hpp"
 
 class Demo {
 public:
-  static void printOrder(Order* order) {
+  static void printOrder(const Order& order) {
     std::cout << "------------------------------" << std::endl;
-    std::cout << "Order #" << order->getId() << std::endl;
-    std::cout << "  Customer: " << order->getCustomerName() << std::endl;
-    std::cout << "  Status:   " << orderStatusToString(order->getStatus()) << std::endl;
+    std::cout << "Order #" << order.getId() << std::endl;
+    std::cout << "  Customer: " << order.getCustomerName() << std::endl;
+    std::cout << "  Status:   " << orderStatusToString(order.getStatus()) << std::endl;
     std::cout << "  Total:    $" << std::fixed << std::setprecision(2)
-              << order->getTotalAmount() << std::endl;
-    std::cout << "  Created:  " << order->getCreatedAt() << std::endl;
-    std::cout << "  Updated:  " << order->getUpdatedAt() << std::endl;
+              << order.getTotalAmount() << std::endl;
+    std::cout << "  Created:  " << order.getCreatedAt() << std::endl;
+    std::cout << "  Updated:  " << order.getUpdatedAt() << std::endl;
     std::cout << "  Items:" << std::endl;
-    for (auto& item : order->getItems()) {
+    for (const auto& item : order.getItems()) {
       std::cout << "    - " << item.getProductName()
                 << " (x" << item.getQuantity() << ")"
                 << " @ $" << std::fixed << std::setprecision(2) << item.getPrice()
@@ -42,7 +44,7 @@ public:
     std::cout << "> ";
   }
 
-  static void handleCreateOrder(OrderService* service) {
+  static void handleCreateOrder(OrderService& service) {
     std::string customerName;
     std::cout << "Enter customer name: ";
     std::getline(std::cin, customerName);
@@ -71,39 +73,37 @@ public:
       std::getline(std::cin, addMore);
     }
 
-    service->createOrder(customerName, items);
+    service.createOrder(customerName, items);
   }
 
-  static void handleGetOrder(OrderService* service) {
+  static void handleGetOrder(OrderService& service) {
     int orderId;
     std::cout << "Enter order ID: ";
     std::cin >> orderId;
     std::cin.ignore();
 
-    Order* order = service->getOrderById(orderId);
+    auto order = service.getOrderById(orderId);
     if (order != nullptr) {
-      printOrder(order);
-      delete order;
+      printOrder(*order);
     } else {
       std::cout << "Order not found." << std::endl;
     }
   }
 
-  static void handleListAll(OrderService* service) {
-    std::vector<Order*> orders = service->getAllOrders();
+  static void handleListAll(OrderService& service) {
+    auto orders = service.getAllOrders();
     if (orders.empty()) {
       std::cout << "No orders found." << std::endl;
       return;
     }
 
     std::cout << "\nFound " << orders.size() << " order(s):" << std::endl;
-    for (auto* order : orders) {
-      printOrder(order);
-      delete order;
+    for (auto& order : orders) {
+      printOrder(*order);
     }
   }
 
-  static void handleListByStatus(OrderService* service) {
+  static void handleListByStatus(OrderService& service) {
     std::cout << "Select status:" << std::endl;
     std::cout << "  1. PENDING" << std::endl;
     std::cout << "  2. PROCESSING" << std::endl;
@@ -128,7 +128,7 @@ public:
         return;
     }
 
-    std::vector<Order*> orders = service->getOrdersByStatus(status);
+    auto orders = service.getOrdersByStatus(status);
     if (orders.empty()) {
       std::cout << "No orders found with status "
                 << orderStatusToString(status) << "." << std::endl;
@@ -136,13 +136,12 @@ public:
     }
 
     std::cout << "\nFound " << orders.size() << " order(s):" << std::endl;
-    for (auto* order : orders) {
-      printOrder(order);
-      delete order;
+    for (auto& order : orders) {
+      printOrder(*order);
     }
   }
 
-  static void handleUpdateStatus(OrderService* service) {
+  static void handleUpdateStatus(OrderService& service) {
     int orderId;
     std::cout << "Enter order ID: ";
     std::cin >> orderId;
@@ -168,7 +167,7 @@ public:
         return;
     }
 
-    if (service->updateOrderStatus(orderId, status)) {
+    if (service.updateOrderStatus(orderId, status)) {
       std::cout << "Order #" << orderId << " updated to "
                 << orderStatusToString(status) << "." << std::endl;
     } else {
@@ -176,13 +175,13 @@ public:
     }
   }
 
-  static void handleCancelOrder(OrderService* service) {
+  static void handleCancelOrder(OrderService& service) {
     int orderId;
     std::cout << "Enter order ID to cancel: ";
     std::cin >> orderId;
     std::cin.ignore();
 
-    service->cancelOrder(orderId);
+    service.cancelOrder(orderId);
   }
 
   static void run() {
@@ -195,10 +194,16 @@ public:
     db->initializeSchema();
 
     // Services
-    OrderService* service = new OrderService();
+    auto service = std::make_unique<OrderService>();
+
+    // Observers
+    LoggingObserver logger;
+    NotificationObserver notifier;
+    service->addObserver(&logger);
+    service->addObserver(&notifier);
 
     // Background job: sweeps every 60s, but only promotes orders aged >= 5 min
-    BackgroundJob* bgJob = new BackgroundJob(service, 60);
+    auto bgJob = std::make_unique<BackgroundJob>(service.get(), 60);
     bgJob->start();
 
     // Interactive menu loop
@@ -209,12 +214,12 @@ public:
       std::cin.ignore();
 
       switch (choice) {
-        case 1: handleCreateOrder(service); break;
-        case 2: handleGetOrder(service); break;
-        case 3: handleListAll(service); break;
-        case 4: handleListByStatus(service); break;
-        case 5: handleUpdateStatus(service); break;
-        case 6: handleCancelOrder(service); break;
+        case 1: handleCreateOrder(*service); break;
+        case 2: handleGetOrder(*service); break;
+        case 3: handleListAll(*service); break;
+        case 4: handleListByStatus(*service); break;
+        case 5: handleUpdateStatus(*service); break;
+        case 6: handleCancelOrder(*service); break;
         case 7:
           std::cout << "Shutting down..." << std::endl;
           break;
@@ -225,8 +230,6 @@ public:
 
     // Cleanup
     bgJob->stop();
-    delete bgJob;
-    delete service;
     db->disconnect();
   }
 };

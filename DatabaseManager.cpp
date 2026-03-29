@@ -1,8 +1,6 @@
 #include "DatabaseManager.hpp"
 #include <iostream>
 
-DatabaseManager* DatabaseManager::instance = nullptr;
-
 DatabaseManager::DatabaseManager()
   : port(3306), poolSize(5) {}
 
@@ -11,10 +9,8 @@ DatabaseManager::~DatabaseManager() {
 }
 
 DatabaseManager* DatabaseManager::getInstance() {
-  if (instance == nullptr) {
-    instance = new DatabaseManager();
-  }
-  return instance;
+  static DatabaseManager instance;
+  return &instance;
 }
 
 MYSQL* DatabaseManager::createConnection() {

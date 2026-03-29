@@ -12,14 +12,28 @@ static void cleanTestData() {
   db->release(conn);
 }
 
+// Helper that transitions through valid states to reach targetStatus
 static int createTestOrder(OrderService* service, std::string name,
                            OrderStatus targetStatus = PENDING) {
   std::vector<OrderItem> items;
   items.push_back(OrderItem("Product", 1, 25.00));
   int id = service->createOrder(name, items);
-  if (targetStatus != PENDING) {
-    service->updateOrderStatus(id, targetStatus);
+
+  if (targetStatus == PENDING) return id;
+
+  if (targetStatus == CANCELLED) {
+    service->cancelOrder(id);
+    return id;
   }
+
+  // Walk through the valid transition chain
+  service->updateOrderStatus(id, PROCESSING);
+  if (targetStatus == PROCESSING) return id;
+
+  service->updateOrderStatus(id, SHIPPED);
+  if (targetStatus == SHIPPED) return id;
+
+  service->updateOrderStatus(id, DELIVERED);
   return id;
 }
 
@@ -31,10 +45,9 @@ static int testListAllOrders() {
   createTestOrder(&service, "Bob");
   createTestOrder(&service, "Charlie");
 
-  std::vector<Order*> orders = service.getAllOrders();
+  auto orders = service.getAllOrders();
   t.assert_equal(3, (int)orders.size(), "Returns 3 orders");
 
-  for (auto* o : orders) delete o;
   return t.printResults();
 }
 
@@ -42,7 +55,7 @@ static int testListEmptyOrders() {
   TestHelper t("List Empty Orders");
   OrderService service;
 
-  std::vector<Order*> orders = service.getAllOrders();
+  auto orders = service.getAllOrders();
   t.assert_equal(0, (int)orders.size(), "Returns 0 orders when DB is empty");
 
   return t.printResults();
@@ -56,10 +69,9 @@ static int testFilterByPendingStatus() {
   createTestOrder(&service, "Bob");
   createTestOrder(&service, "Charlie", PROCESSING);
 
-  std::vector<Order*> pending = service.getOrdersByStatus(PENDING);
+  auto pending = service.getOrdersByStatus(PENDING);
   t.assert_equal(2, (int)pending.size(), "2 orders are PENDING");
 
-  for (auto* o : pending) delete o;
   return t.printResults();
 }
 
@@ -71,10 +83,9 @@ static int testFilterByProcessingStatus() {
   createTestOrder(&service, "Bob", PROCESSING);
   createTestOrder(&service, "Charlie", PROCESSING);
 
-  std::vector<Order*> processing = service.getOrdersByStatus(PROCESSING);
+  auto processing = service.getOrdersByStatus(PROCESSING);
   t.assert_equal(2, (int)processing.size(), "2 orders are PROCESSING");
 
-  for (auto* o : processing) delete o;
   return t.printResults();
 }
 
@@ -86,12 +97,11 @@ static int testFilterByShippedStatus() {
   createTestOrder(&service, "Bob");
   createTestOrder(&service, "Charlie", PROCESSING);
 
-  std::vector<Order*> shipped = service.getOrdersByStatus(SHIPPED);
+  auto shipped = service.getOrdersByStatus(SHIPPED);
   t.assert_equal(1, (int)shipped.size(), "1 order is SHIPPED");
   t.assert_equal(std::string("Alice"), shipped[0]->getCustomerName(),
                  "Shipped order belongs to Alice");
 
-  for (auto* o : shipped) delete o;
   return t.printResults();
 }
 
@@ -102,10 +112,9 @@ static int testFilterReturnsEmptyForNoMatch() {
   createTestOrder(&service, "Alice");
   createTestOrder(&service, "Bob");
 
-  std::vector<Order*> delivered = service.getOrdersByStatus(DELIVERED);
+  auto delivered = service.getOrdersByStatus(DELIVERED);
   t.assert_equal(0, (int)delivered.size(), "No DELIVERED orders");
 
-  for (auto* o : delivered) delete o;
   return t.printResults();
 }
 
@@ -120,8 +129,8 @@ static int testGetOrderByIdWithItems() {
 
   int orderId = service.createOrder("Dave", items);
 
-  Order* order = service.getOrderById(orderId);
-  t.assert_not_null(order, "Order exists");
+  auto order = service.getOrderById(orderId);
+  t.assert_true(order != nullptr, "Order exists");
   t.assert_equal(3, (int)order->getItems().size(), "Has 3 items");
   t.assert_equal(425.00, order->getTotalAmount(), "Total = 75 + 50 + 300");
 
@@ -136,7 +145,6 @@ static int testGetOrderByIdWithItems() {
   t.assert_true(hasMouse, "Contains Mouse item");
   t.assert_true(hasMonitor, "Contains Monitor item");
 
-  delete order;
   return t.printResults();
 }
 
@@ -154,8 +162,8 @@ static int testMultipleOrdersIndependent() {
 
   t.assert_true(id1 != id2, "Different order IDs");
 
-  Order* o1 = service.getOrderById(id1);
-  Order* o2 = service.getOrderById(id2);
+  auto o1 = service.getOrderById(id1);
+  auto o2 = service.getOrderById(id2);
 
   t.assert_equal(100.00, o1->getTotalAmount(), "Order 1 total correct");
   t.assert_equal(150.00, o2->getTotalAmount(), "Order 2 total correct");
@@ -164,18 +172,14 @@ static int testMultipleOrdersIndependent() {
 
   // Cancel order 1, order 2 should be unaffected
   service.cancelOrder(id1);
-  Order* o1After = service.getOrderById(id1);
-  Order* o2After = service.getOrderById(id2);
+  auto o1After = service.getOrderById(id1);
+  auto o2After = service.getOrderById(id2);
 
   t.assert_equal(std::string("CANCELLED"), orderStatusToString(o1After->getStatus()),
                  "Order 1 cancelled");
   t.assert_equal(std::string("PENDING"), orderStatusToString(o2After->getStatus()),
                  "Order 2 still PENDING");
 
-  delete o1;
-  delete o2;
-  delete o1After;
-  delete o2After;
   return t.printResults();
 }
 

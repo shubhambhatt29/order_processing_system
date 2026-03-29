@@ -9,8 +9,6 @@
 
 class DatabaseManager {
 private:
-  static DatabaseManager* instance;
-
   std::string host;
   std::string user;
   std::string password;

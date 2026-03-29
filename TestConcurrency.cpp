@@ -51,10 +51,9 @@ static int testConcurrentOrderCreation() {
 
   // Verify all orders exist in DB
   OrderService service;
-  std::vector<Order*> allOrders = service.getAllOrders();
+  auto allOrders = service.getAllOrders();
   t.assert_equal(numThreads, (int)allOrders.size(), "All 10 orders persisted in DB");
 
-  for (auto* o : allOrders) delete o;
   return t.printResults();
 }
 
@@ -80,11 +79,10 @@ static int testConcurrentReadWrite() {
     threads.push_back(std::thread([&readSuccess]() {
       OrderService svc;
       for (int j = 0; j < 3; ++j) {
-        std::vector<Order*> orders = svc.getAllOrders();
+        auto orders = svc.getAllOrders();
         if (!orders.empty()) {
           readSuccess++;
         }
-        for (auto* o : orders) delete o;
       }
     }));
   }
@@ -108,10 +106,9 @@ static int testConcurrentReadWrite() {
   t.assert_true(readSuccess.load() > 0, "Concurrent reads succeeded during writes");
 
   // Verify final count: 5 pre-existing + 5 new = 10
-  std::vector<Order*> allOrders = service.getAllOrders();
+  auto allOrders = service.getAllOrders();
   t.assert_equal(10, (int)allOrders.size(), "All 10 orders exist after concurrent ops");
 
-  for (auto* o : allOrders) delete o;
   return t.printResults();
 }
 
@@ -148,10 +145,9 @@ static int testConcurrentStatusUpdates() {
   t.assert_equal(10, (int)updateSuccess.load(), "All 10 concurrent updates succeeded");
 
   // Verify all are now PROCESSING
-  std::vector<Order*> processing = service.getOrdersByStatus(PROCESSING);
+  auto processing = service.getOrdersByStatus(PROCESSING);
   t.assert_equal(10, (int)processing.size(), "All 10 orders now PROCESSING");
 
-  for (auto* o : processing) delete o;
   return t.printResults();
 }
 
@@ -184,12 +180,11 @@ static int testConcurrentCancelRace() {
   // At least one should succeed, and the order should be CANCELLED
   t.assert_true(cancelSuccess.load() >= 1, "At least one cancel succeeded");
 
-  Order* order = service.getOrderById(orderId);
-  t.assert_not_null(order, "Order still exists");
+  auto order = service.getOrderById(orderId);
+  t.assert_true(order != nullptr, "Order still exists");
   t.assert_equal(std::string("CANCELLED"), orderStatusToString(order->getStatus()),
                  "Order is CANCELLED");
 
-  delete order;
   return t.printResults();
 }
 
@@ -225,10 +220,9 @@ static int testBackgroundJobWithConcurrentOps() {
 
   t.assert_equal(5, (int)created.load(), "All orders created while bg job running");
 
-  std::vector<Order*> allOrders = service.getAllOrders();
+  auto allOrders = service.getAllOrders();
   t.assert_equal(5, (int)allOrders.size(), "All 5 orders persisted");
 
-  for (auto* o : allOrders) delete o;
   return t.printResults();
 }
 

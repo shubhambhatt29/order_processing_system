@@ -31,12 +31,11 @@ static int testCancelPendingOrder() {
   bool cancelled = service.cancelOrder(orderId);
   t.assert_true(cancelled, "Cancel returns true for PENDING order");
 
-  Order* order = service.getOrderById(orderId);
-  t.assert_not_null(order, "Order still exists");
+  auto order = service.getOrderById(orderId);
+  t.assert_true(order != nullptr, "Order still exists");
   t.assert_equal(std::string("CANCELLED"), orderStatusToString(order->getStatus()),
                  "Status is CANCELLED");
 
-  delete order;
   return t.printResults();
 }
 
@@ -48,13 +47,12 @@ static int testCancelNonPendingOrder() {
   service.updateOrderStatus(orderId, PROCESSING);
 
   bool cancelled = service.cancelOrder(orderId);
-  t.assert_false(cancelled, "Cannot cancel PROCESSING order");
+  t.assert_false(cancelled, "Cannot cancel PROCESSING order via cancelOrder");
 
-  Order* order = service.getOrderById(orderId);
+  auto order = service.getOrderById(orderId);
   t.assert_equal(std::string("PROCESSING"), orderStatusToString(order->getStatus()),
                  "Status unchanged");
 
-  delete order;
   return t.printResults();
 }
 
@@ -69,11 +67,10 @@ static int testCancelShippedOrder() {
   bool cancelled = service.cancelOrder(orderId);
   t.assert_false(cancelled, "Cannot cancel SHIPPED order");
 
-  Order* order = service.getOrderById(orderId);
+  auto order = service.getOrderById(orderId);
   t.assert_equal(std::string("SHIPPED"), orderStatusToString(order->getStatus()),
                  "Status unchanged");
 
-  delete order;
   return t.printResults();
 }
 
@@ -86,26 +83,61 @@ static int testStatusTransitions() {
   // PENDING -> PROCESSING
   bool updated = service.updateOrderStatus(orderId, PROCESSING);
   t.assert_true(updated, "Update to PROCESSING succeeds");
-  Order* o1 = service.getOrderById(orderId);
+  auto o1 = service.getOrderById(orderId);
   t.assert_equal(std::string("PROCESSING"), orderStatusToString(o1->getStatus()),
                  "Status is PROCESSING");
-  delete o1;
 
   // PROCESSING -> SHIPPED
   updated = service.updateOrderStatus(orderId, SHIPPED);
   t.assert_true(updated, "Update to SHIPPED succeeds");
-  Order* o2 = service.getOrderById(orderId);
+  auto o2 = service.getOrderById(orderId);
   t.assert_equal(std::string("SHIPPED"), orderStatusToString(o2->getStatus()),
                  "Status is SHIPPED");
-  delete o2;
 
   // SHIPPED -> DELIVERED
   updated = service.updateOrderStatus(orderId, DELIVERED);
   t.assert_true(updated, "Update to DELIVERED succeeds");
-  Order* o3 = service.getOrderById(orderId);
+  auto o3 = service.getOrderById(orderId);
   t.assert_equal(std::string("DELIVERED"), orderStatusToString(o3->getStatus()),
                  "Status is DELIVERED");
-  delete o3;
+
+  return t.printResults();
+}
+
+static int testInvalidTransitions() {
+  TestHelper t("Invalid Status Transitions (State Machine)");
+  OrderService service;
+
+  // DELIVERED -> PENDING (invalid)
+  int id1 = createTestOrder(&service, "TestA");
+  service.updateOrderStatus(id1, PROCESSING);
+  service.updateOrderStatus(id1, SHIPPED);
+  service.updateOrderStatus(id1, DELIVERED);
+  bool result = service.updateOrderStatus(id1, PENDING);
+  t.assert_false(result, "DELIVERED -> PENDING rejected");
+
+  // CANCELLED -> PROCESSING (invalid)
+  int id2 = createTestOrder(&service, "TestB");
+  service.cancelOrder(id2);
+  result = service.updateOrderStatus(id2, PROCESSING);
+  t.assert_false(result, "CANCELLED -> PROCESSING rejected");
+
+  // SHIPPED -> PENDING (invalid)
+  int id3 = createTestOrder(&service, "TestC");
+  service.updateOrderStatus(id3, PROCESSING);
+  service.updateOrderStatus(id3, SHIPPED);
+  result = service.updateOrderStatus(id3, PENDING);
+  t.assert_false(result, "SHIPPED -> PENDING rejected");
+
+  // PENDING -> SHIPPED (skipping PROCESSING, invalid)
+  int id4 = createTestOrder(&service, "TestD");
+  result = service.updateOrderStatus(id4, SHIPPED);
+  t.assert_false(result, "PENDING -> SHIPPED rejected (must go through PROCESSING)");
+
+  // PENDING -> DELIVERED (skipping all, invalid)
+  int id5 = createTestOrder(&service, "TestE");
+  result = service.updateOrderStatus(id5, DELIVERED);
+  t.assert_false(result, "PENDING -> DELIVERED rejected");
 
   return t.printResults();
 }
@@ -141,18 +173,16 @@ static int testBackgroundJobPromotion() {
   service.promotePendingOrders();
 
   // Old order should be promoted
-  Order* old = service.getOrderById(orderId);
-  t.assert_not_null(old, "Backdated order exists");
+  auto old = service.getOrderById(orderId);
+  t.assert_true(old != nullptr, "Backdated order exists");
   t.assert_equal(std::string("PROCESSING"), orderStatusToString(old->getStatus()),
                  "Backdated order promoted to PROCESSING");
-  delete old;
 
   // Fresh order should still be PENDING
-  Order* fresh = service.getOrderById(freshId);
-  t.assert_not_null(fresh, "Fresh order exists");
+  auto fresh = service.getOrderById(freshId);
+  t.assert_true(fresh != nullptr, "Fresh order exists");
   t.assert_equal(std::string("PENDING"), orderStatusToString(fresh->getStatus()),
                  "Fresh order still PENDING (not yet 5 min old)");
-  delete fresh;
 
   return t.printResults();
 }
@@ -195,6 +225,9 @@ int main() {
 
   cleanTestData();
   totalFailures += testStatusTransitions();
+
+  cleanTestData();
+  totalFailures += testInvalidTransitions();
 
   cleanTestData();
   totalFailures += testCancelNonExistentOrder();

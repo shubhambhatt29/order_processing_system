@@ -1,6 +1,7 @@
 #include "OrderRepository.hpp"
 #include <iostream>
 #include <sstream>
+#include <cstring>
 
 OrderRepository::OrderRepository() {
   db = DatabaseManager::getInstance();
@@ -9,32 +10,88 @@ OrderRepository::OrderRepository() {
 int OrderRepository::createOrder(Order& order) {
   MYSQL* conn = db->acquire();
 
-  std::ostringstream query;
-  query << "INSERT INTO orders (customerName, status, totalAmount) VALUES ('"
-        << order.getCustomerName() << "', '"
-        << orderStatusToString(order.getStatus()) << "', "
-        << order.getTotalAmount() << ")";
-
-  if (mysql_query(conn, query.str().c_str()) != 0) {
-    std::cerr << "Failed to create order: " << mysql_error(conn) << std::endl;
+  const char* sql = "INSERT INTO orders (customerName, status, totalAmount) VALUES (?, ?, ?)";
+  MYSQL_STMT* stmt = mysql_stmt_init(conn);
+  if (mysql_stmt_prepare(stmt, sql, strlen(sql)) != 0) {
+    std::cerr << "Failed to prepare statement: " << mysql_stmt_error(stmt) << std::endl;
+    mysql_stmt_close(stmt);
     db->release(conn);
     return -1;
   }
 
-  int orderId = (int)mysql_insert_id(conn);
+  MYSQL_BIND bind[3];
+  memset(bind, 0, sizeof(bind));
+
+  std::string name = order.getCustomerName();
+  std::string status = orderStatusToString(order.getStatus());
+  double total = order.getTotalAmount();
+  unsigned long nameLen = name.length();
+  unsigned long statusLen = status.length();
+
+  bind[0].buffer_type = MYSQL_TYPE_STRING;
+  bind[0].buffer = (void*)name.c_str();
+  bind[0].buffer_length = nameLen;
+  bind[0].length = &nameLen;
+
+  bind[1].buffer_type = MYSQL_TYPE_STRING;
+  bind[1].buffer = (void*)status.c_str();
+  bind[1].buffer_length = statusLen;
+  bind[1].length = &statusLen;
+
+  bind[2].buffer_type = MYSQL_TYPE_DOUBLE;
+  bind[2].buffer = &total;
+
+  mysql_stmt_bind_param(stmt, bind);
+
+  if (mysql_stmt_execute(stmt) != 0) {
+    std::cerr << "Failed to create order: " << mysql_stmt_error(stmt) << std::endl;
+    mysql_stmt_close(stmt);
+    db->release(conn);
+    return -1;
+  }
+
+  int orderId = (int)mysql_stmt_insert_id(stmt);
   order.setId(orderId);
+  mysql_stmt_close(stmt);
 
+  // Insert order items using prepared statements
+  const char* itemSql = "INSERT INTO order_items (orderId, productName, quantity, price) VALUES (?, ?, ?, ?)";
   for (auto& item : order.getItems()) {
-    std::ostringstream itemQuery;
-    itemQuery << "INSERT INTO order_items (orderId, productName, quantity, price) VALUES ("
-              << orderId << ", '"
-              << item.getProductName() << "', "
-              << item.getQuantity() << ", "
-              << item.getPrice() << ")";
-
-    if (mysql_query(conn, itemQuery.str().c_str()) != 0) {
-      std::cerr << "Failed to add order item: " << mysql_error(conn) << std::endl;
+    MYSQL_STMT* itemStmt = mysql_stmt_init(conn);
+    if (mysql_stmt_prepare(itemStmt, itemSql, strlen(itemSql)) != 0) {
+      std::cerr << "Failed to prepare item statement: " << mysql_stmt_error(itemStmt) << std::endl;
+      mysql_stmt_close(itemStmt);
+      continue;
     }
+
+    MYSQL_BIND itemBind[4];
+    memset(itemBind, 0, sizeof(itemBind));
+
+    std::string productName = item.getProductName();
+    int quantity = item.getQuantity();
+    double price = item.getPrice();
+    unsigned long productNameLen = productName.length();
+
+    itemBind[0].buffer_type = MYSQL_TYPE_LONG;
+    itemBind[0].buffer = &orderId;
+
+    itemBind[1].buffer_type = MYSQL_TYPE_STRING;
+    itemBind[1].buffer = (void*)productName.c_str();
+    itemBind[1].buffer_length = productNameLen;
+    itemBind[1].length = &productNameLen;
+
+    itemBind[2].buffer_type = MYSQL_TYPE_LONG;
+    itemBind[2].buffer = &quantity;
+
+    itemBind[3].buffer_type = MYSQL_TYPE_DOUBLE;
+    itemBind[3].buffer = &price;
+
+    mysql_stmt_bind_param(itemStmt, itemBind);
+
+    if (mysql_stmt_execute(itemStmt) != 0) {
+      std::cerr << "Failed to add order item: " << mysql_stmt_error(itemStmt) << std::endl;
+    }
+    mysql_stmt_close(itemStmt);
   }
 
   db->release(conn);
@@ -44,21 +101,48 @@ int OrderRepository::createOrder(Order& order) {
 void OrderRepository::addOrderItem(int orderId, OrderItem& item) {
   MYSQL* conn = db->acquire();
 
-  std::ostringstream query;
-  query << "INSERT INTO order_items (orderId, productName, quantity, price) VALUES ("
-        << orderId << ", '"
-        << item.getProductName() << "', "
-        << item.getQuantity() << ", "
-        << item.getPrice() << ")";
-
-  if (mysql_query(conn, query.str().c_str()) != 0) {
-    std::cerr << "Failed to add order item: " << mysql_error(conn) << std::endl;
+  const char* sql = "INSERT INTO order_items (orderId, productName, quantity, price) VALUES (?, ?, ?, ?)";
+  MYSQL_STMT* stmt = mysql_stmt_init(conn);
+  if (mysql_stmt_prepare(stmt, sql, strlen(sql)) != 0) {
+    std::cerr << "Failed to prepare statement: " << mysql_stmt_error(stmt) << std::endl;
+    mysql_stmt_close(stmt);
+    db->release(conn);
+    return;
   }
 
+  MYSQL_BIND bind[4];
+  memset(bind, 0, sizeof(bind));
+
+  std::string productName = item.getProductName();
+  int quantity = item.getQuantity();
+  double price = item.getPrice();
+  unsigned long productNameLen = productName.length();
+
+  bind[0].buffer_type = MYSQL_TYPE_LONG;
+  bind[0].buffer = &orderId;
+
+  bind[1].buffer_type = MYSQL_TYPE_STRING;
+  bind[1].buffer = (void*)productName.c_str();
+  bind[1].buffer_length = productNameLen;
+  bind[1].length = &productNameLen;
+
+  bind[2].buffer_type = MYSQL_TYPE_LONG;
+  bind[2].buffer = &quantity;
+
+  bind[3].buffer_type = MYSQL_TYPE_DOUBLE;
+  bind[3].buffer = &price;
+
+  mysql_stmt_bind_param(stmt, bind);
+
+  if (mysql_stmt_execute(stmt) != 0) {
+    std::cerr << "Failed to add order item: " << mysql_stmt_error(stmt) << std::endl;
+  }
+
+  mysql_stmt_close(stmt);
   db->release(conn);
 }
 
-Order* OrderRepository::findById(int orderId) {
+std::unique_ptr<Order> OrderRepository::findById(int orderId) {
   MYSQL* conn = db->acquire();
 
   std::ostringstream query;
@@ -84,7 +168,7 @@ Order* OrderRepository::findById(int orderId) {
     return nullptr;
   }
 
-  Order* order = new Order(
+  auto order = std::make_unique<Order>(
     std::stoi(row[0]),
     std::string(row[1]),
     stringToOrderStatus(std::string(row[2])),
@@ -122,8 +206,8 @@ Order* OrderRepository::findById(int orderId) {
   return order;
 }
 
-std::vector<Order*> OrderRepository::findAll() {
-  std::vector<Order*> orders;
+std::vector<std::unique_ptr<Order>> OrderRepository::findAll() {
+  std::vector<std::unique_ptr<Order>> orders;
   MYSQL* conn = db->acquire();
 
   std::string query = "SELECT id, customerName, status, totalAmount, createdAt, updatedAt FROM orders";
@@ -140,7 +224,7 @@ std::vector<Order*> OrderRepository::findAll() {
     return orders;
   }
 
-  // Collect order IDs first, then release the result
+  // Collect order data first, then release the result
   std::vector<std::tuple<int, std::string, std::string, double, std::string, std::string>> rows;
   MYSQL_ROW row;
   while ((row = mysql_fetch_row(result)) != nullptr) {
@@ -156,7 +240,7 @@ std::vector<Order*> OrderRepository::findAll() {
   mysql_free_result(result);
 
   for (auto& [id, name, status, total, created, updated] : rows) {
-    Order* order = new Order(id, name, stringToOrderStatus(status), total, created, updated);
+    auto order = std::make_unique<Order>(id, name, stringToOrderStatus(status), total, created, updated);
 
     std::ostringstream itemQuery;
     itemQuery << "SELECT id, orderId, productName, quantity, price "
@@ -176,15 +260,15 @@ std::vector<Order*> OrderRepository::findAll() {
       }
     }
 
-    orders.push_back(order);
+    orders.push_back(std::move(order));
   }
 
   db->release(conn);
   return orders;
 }
 
-std::vector<Order*> OrderRepository::findByStatus(OrderStatus status) {
-  std::vector<Order*> orders;
+std::vector<std::unique_ptr<Order>> OrderRepository::findByStatus(OrderStatus status) {
+  std::vector<std::unique_ptr<Order>> orders;
   MYSQL* conn = db->acquire();
 
   std::ostringstream query;
@@ -218,7 +302,7 @@ std::vector<Order*> OrderRepository::findByStatus(OrderStatus status) {
   mysql_free_result(result);
 
   for (auto& [id, name, statusStr, total, created, updated] : rows) {
-    Order* order = new Order(id, name, stringToOrderStatus(statusStr), total, created, updated);
+    auto order = std::make_unique<Order>(id, name, stringToOrderStatus(statusStr), total, created, updated);
 
     std::ostringstream itemQuery;
     itemQuery << "SELECT id, orderId, productName, quantity, price "
@@ -238,7 +322,7 @@ std::vector<Order*> OrderRepository::findByStatus(OrderStatus status) {
       }
     }
 
-    orders.push_back(order);
+    orders.push_back(std::move(order));
   }
 
   db->release(conn);

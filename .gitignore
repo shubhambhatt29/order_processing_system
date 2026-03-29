@@ -3,6 +3,7 @@ test_order_creation
 test_order_status
 test_order_query
 test_concurrency
+test_patterns
 *.o
 *.dSYM
 .DS_Store
