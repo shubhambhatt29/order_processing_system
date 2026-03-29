@@ -31,6 +31,7 @@ public:
   std::string getCreatedAt() const { return createdAt; }
   std::string getUpdatedAt() const { return updatedAt; }
   std::vector<OrderItem>& getItems() { return items; }
+  const std::vector<OrderItem>& getItems() const { return items; }
 
   void setId(int id) { this->id = id; }
   void setStatus(OrderStatus status) { this->status = status; }

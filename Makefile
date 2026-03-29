@@ -12,6 +12,8 @@ TARGET = order_processing
 TEST_CREATION = test_order_creation
 TEST_STATUS = test_order_status
 TEST_QUERY = test_order_query
+TEST_CONCURRENCY = test_concurrency
+TEST_PATTERNS = test_patterns
 
 all: $(TARGET)
 
@@ -27,7 +29,13 @@ $(TEST_STATUS): TestOrderStatus.cpp $(LIB_SRCS)
 $(TEST_QUERY): TestOrderQuery.cpp $(LIB_SRCS)
 	$(CXX) $(CXXFLAGS) $(MYSQL_CFLAGS) -o $(TEST_QUERY) TestOrderQuery.cpp $(LIB_SRCS) $(MYSQL_LIBS)
 
-tests: $(TEST_CREATION) $(TEST_STATUS) $(TEST_QUERY)
+$(TEST_CONCURRENCY): TestConcurrency.cpp $(LIB_SRCS)
+	$(CXX) $(CXXFLAGS) $(MYSQL_CFLAGS) -o $(TEST_CONCURRENCY) TestConcurrency.cpp $(LIB_SRCS) $(MYSQL_LIBS)
+
+$(TEST_PATTERNS): TestPatterns.cpp $(LIB_SRCS)
+	$(CXX) $(CXXFLAGS) $(MYSQL_CFLAGS) -o $(TEST_PATTERNS) TestPatterns.cpp $(LIB_SRCS) $(MYSQL_LIBS)
+
+tests: $(TEST_CREATION) $(TEST_STATUS) $(TEST_QUERY) $(TEST_CONCURRENCY) $(TEST_PATTERNS)
 
 run-tests: tests
 	@echo ""
@@ -37,8 +45,12 @@ run-tests: tests
 	@./$(TEST_STATUS)
 	@echo "Running Order Query Tests..."
 	@./$(TEST_QUERY)
+	@echo "Running Concurrency Tests..."
+	@./$(TEST_CONCURRENCY)
+	@echo "Running Design Pattern Tests..."
+	@./$(TEST_PATTERNS)
 
 clean:
-	rm -f $(TARGET) $(TEST_CREATION) $(TEST_STATUS) $(TEST_QUERY)
+	rm -f $(TARGET) $(TEST_CREATION) $(TEST_STATUS) $(TEST_QUERY) $(TEST_CONCURRENCY) $(TEST_PATTERNS)
 
 .PHONY: all tests run-tests clean

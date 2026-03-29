@@ -4,11 +4,13 @@
 
 // Cleans test data before/after each suite
 static void cleanTestData() {
-  MYSQL* conn = DatabaseManager::getInstance()->getConnection();
+  DatabaseManager* db = DatabaseManager::getInstance();
+  MYSQL* conn = db->acquire();
   mysql_query(conn, "DELETE FROM order_items");
   mysql_query(conn, "DELETE FROM orders");
   mysql_query(conn, "ALTER TABLE orders AUTO_INCREMENT = 1");
   mysql_query(conn, "ALTER TABLE order_items AUTO_INCREMENT = 1");
+  db->release(conn);
 }
 
 static int testCreateSingleItemOrder() {
@@ -21,15 +23,14 @@ static int testCreateSingleItemOrder() {
   int orderId = service.createOrder("Alice", items);
   t.assert_true(orderId > 0, "Order ID should be positive");
 
-  Order* order = service.getOrderById(orderId);
-  t.assert_not_null(order, "Order should exist in DB");
+  auto order = service.getOrderById(orderId);
+  t.assert_true(order != nullptr, "Order should exist in DB");
   t.assert_equal(std::string("Alice"), order->getCustomerName(), "Customer name matches");
   t.assert_equal(std::string("PENDING"), orderStatusToString(order->getStatus()), "Status is PENDING");
   t.assert_equal(999.99, order->getTotalAmount(), "Total amount matches");
   t.assert_equal(1, (int)order->getItems().size(), "Has 1 item");
   t.assert_equal(std::string("Laptop"), order->getItems()[0].getProductName(), "Item name matches");
 
-  delete order;
   return t.printResults();
 }
 
@@ -45,15 +46,14 @@ static int testCreateMultiItemOrder() {
   int orderId = service.createOrder("Bob", items);
   t.assert_true(orderId > 0, "Order ID should be positive");
 
-  Order* order = service.getOrderById(orderId);
-  t.assert_not_null(order, "Order should exist in DB");
+  auto order = service.getOrderById(orderId);
+  t.assert_true(order != nullptr, "Order should exist in DB");
   t.assert_equal(3, (int)order->getItems().size(), "Has 3 items");
 
   // 2*499.99 + 2*29.99 + 1*19.99 = 1079.95
   t.assert_equal(1079.95, order->getTotalAmount(), "Total calculated correctly");
   t.assert_equal(std::string("Bob"), order->getCustomerName(), "Customer name matches");
 
-  delete order;
   return t.printResults();
 }
 
@@ -79,8 +79,8 @@ static int testRetrieveNonExistentOrder() {
   TestHelper t("Retrieve Non-Existent Order");
   OrderService service;
 
-  Order* order = service.getOrderById(99999);
-  t.assert_null(order, "Non-existent order returns nullptr");
+  auto order = service.getOrderById(99999);
+  t.assert_true(order == nullptr, "Non-existent order returns nullptr");
 
   return t.printResults();
 }
